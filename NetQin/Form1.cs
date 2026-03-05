@@ -34,6 +34,7 @@ namespace NetQin
                     {
                         device.Open();
                         int packetCount = 0;
+                        int deauthCount = 0; 
 
                         // Czyścimy tabelę przed załadowaniem nowego pliku
                         dgvPackets.Rows.Clear();
@@ -54,7 +55,6 @@ namespace NetQin
                             try
                             {
                                 var parsedPacket = Packet.ParsePacket(rawPacket.LinkLayerType, rawPacket.Data);
-
                                 var wifiFrame = parsedPacket.Extract<PacketDotNet.Ieee80211.MacFrame>();
 
                                 if (wifiFrame != null)
@@ -88,17 +88,33 @@ namespace NetQin
                                 // Ignorujemy uszkodzone pakiety
                             }
 
-                            // Bezpieczne dodanie do GUI
+                            
                             this.Invoke((MethodInvoker)delegate
                             {
-                                dgvPackets.Rows.Add(packetCount, time, macSrc, macDst, info);
+                                // Dodajemy wiersz i pobieramy jego indeks
+                                int rowIndex = dgvPackets.Rows.Add(packetCount, time, macSrc, macDst, info);
+
+                                
+                                if (info.Contains("Deauth"))
+                                {
+                                    deauthCount++;
+
+                                    // Pokolorowanie na czerwono
+                                    dgvPackets.Rows[rowIndex].DefaultCellStyle.BackColor = Color.FromArgb(60, 20, 20);
+                                    dgvPackets.Rows[rowIndex].DefaultCellStyle.ForeColor = Color.Red;
+
+                                    // Czerwony log na dole
+                                    rtbLogs.SelectionColor = Color.Red;
+                                    rtbLogs.AppendText($"[{time}] CRITICAL: Wykryto atak! Nadawca: {macSrc}\n");
+                                }
                             });
                         };
 
                         device.Capture();
 
+                        
                         rtbLogs.SelectionColor = Color.Lime;
-                        rtbLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] SUCCESS: Załadowano {packetCount} pakietów do tabeli!\n");
+                        rtbLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] SUCCESS: Załadowano {packetCount} pakietów. Wykryto {deauthCount} ataków!\n");
                     }
                 }
                 catch (Exception ex)
