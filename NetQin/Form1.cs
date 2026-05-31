@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using WinColor = System.Drawing.Color;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -20,10 +21,21 @@ namespace NetQin
         private const int FilterDebounceMilliseconds = 250;
         private const int EmSetCueBanner = 0x1501;
 
+        private static readonly WinColor AppBackground = WinColor.FromArgb(8, 13, 26);
+        private static readonly WinColor HeaderBackground = WinColor.FromArgb(15, 23, 42);
+        private static readonly WinColor CardBackground = WinColor.FromArgb(18, 27, 48);
+        private static readonly WinColor CardBackgroundSoft = WinColor.FromArgb(14, 22, 40);
+        private static readonly WinColor InputBackground = WinColor.FromArgb(24, 35, 61);
+        private static readonly WinColor PrimaryAccent = WinColor.FromArgb(124, 77, 255);
+        private static readonly WinColor SecondaryAccent = WinColor.FromArgb(59, 130, 246);
+        private static readonly WinColor MutedText = WinColor.FromArgb(157, 171, 204);
+        private static readonly WinColor StrongText = WinColor.FromArgb(241, 245, 249);
+
         private string currentFilePath = string.Empty;
         private bool isAnalysisRunning = false;
         private bool isReportExportRunning = false;
         private bool suppressFilterRefresh = false;
+        private int visibleLogEntryCount = 0;
         private readonly ToolTip fileNameToolTip = new ToolTip();
         private readonly Timer filterDebounceTimer = new Timer();
 
@@ -50,15 +62,30 @@ namespace NetQin
         private Button btnClearFilters;
         private Label lblVisibleCount;
 
-        private int dashboardLeft;
-        private int dashboardTop;
-        private int dashboardFullWidth;
-        private int dashboardTileHeight;
-        private int dashboardGap = 14;
-        private int statusOriginalBottom;
+        private Panel panelHeader;
+        private Panel panelFileCard;
+        private Panel panelOperationBar;
+        private ProgressBar progressOperation;
+        private Label lblHeaderEyebrow;
+        private Label lblFileMeta;
+        private Label lblOperationTitle;
+        private Label lblOperationDescription;
+        private Label lblDashboardTitle;
+        private Label lblDashboardSubtitle;
+        private Label lblTableSubtitle;
+        private Label lblLogsSubtitle;
+        private Label lblFilterTitle;
+        private Label lblFilterSearchCaption;
+        private Label lblFilterSsidCaption;
+        private Label lblFilterBssidCaption;
+        private Label lblFilterTypeCaption;
+        private Button btnClearLogs;
 
-        private int gridOriginalLeft;
-        private int gridOriginalTop;
+        private Panel panelPacketsAccent;
+        private Panel panelDeauthAccent;
+        private Panel panelDisassocAccent;
+        private Panel panelSuspiciousAccent;
+        private Panel panelStatusAccent;
 
         public Form1()
         {
@@ -67,10 +94,8 @@ namespace NetQin
 
             InitializeDynamicDashboardCards();
             InitializeFilterBar();
+            InitializeModernWorkspace();
             InitializeFilterDebounce();
-
-            gridOriginalLeft = dgvPackets.Left;
-            gridOriginalTop = dgvPackets.Top;
 
             this.Resize += (s, args) => ApplyDashboardLayout();
 
@@ -94,6 +119,12 @@ namespace NetQin
             ApplyDashboardLayout();
             UpdateDashboard();
             UpdateVisibleCount(0, 0);
+            UpdateActionState();
+            SetOperationState(
+                "Gotowy do analizy",
+                "Wczytaj plik PCAP lub PCAPNG, aby rozpocząć inspekcję ruchu bezprzewodowego.",
+                false,
+                SecondaryAccent);
 
             this.Disposed += (s, e) =>
             {
@@ -112,8 +143,8 @@ namespace NetQin
             dgvPackets.Columns.Add(CreateTextColumn("colDestination", "MAC Odbiorcy", 20));
             dgvPackets.Columns.Add(CreateTextColumn("colSsid", "SSID", 18));
             dgvPackets.Columns.Add(CreateTextColumn("colBssid", "BSSID", 20));
-            dgvPackets.Columns.Add(CreateTextColumn("colSubtype", "Subtype", 18));
-            dgvPackets.Columns.Add(CreateTextColumn("colChannel", "Channel", 10));
+            dgvPackets.Columns.Add(CreateTextColumn("colSubtype", "Podtyp", 18));
+            dgvPackets.Columns.Add(CreateTextColumn("colChannel", "Kanał", 10));
             dgvPackets.Columns.Add(CreateTextColumn("colInfo", "Info", 44));
         }
 
@@ -131,30 +162,41 @@ namespace NetQin
 
         private void ConfigurePremiumUi()
         {
+            this.BackColor = AppBackground;
+            this.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular);
+
             fileNameToolTip.InitialDelay = 150;
             fileNameToolTip.ReshowDelay = 100;
             fileNameToolTip.AutoPopDelay = 8000;
             fileNameToolTip.ShowAlways = true;
             fileNameToolTip.SetToolTip(textBox1, "Brak wczytanego pliku");
 
-            lblPacketCount.Font = new System.Drawing.Font("Segoe UI Semibold", 27F, System.Drawing.FontStyle.Bold);
-            lblDeauthCount.Font = new System.Drawing.Font("Segoe UI Semibold", 27F, System.Drawing.FontStyle.Bold);
-            lblSuspiciousCount.Font = new System.Drawing.Font("Segoe UI Semibold", 27F, System.Drawing.FontStyle.Bold);
+            lblPacketCount.Font = new System.Drawing.Font("Segoe UI Semibold", 24F, System.Drawing.FontStyle.Bold);
+            lblDeauthCount.Font = new System.Drawing.Font("Segoe UI Semibold", 24F, System.Drawing.FontStyle.Bold);
+            lblSuspiciousCount.Font = new System.Drawing.Font("Segoe UI Semibold", 24F, System.Drawing.FontStyle.Bold);
 
-            lblDisassocCount.Font = new System.Drawing.Font("Segoe UI Semibold", 27F, System.Drawing.FontStyle.Bold);
-            lblDisassocCaption.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Regular);
-            lblDisassocCaption.ForeColor = WinColor.FromArgb(172, 181, 215);
+            lblDisassocCount.Font = new System.Drawing.Font("Segoe UI Semibold", 24F, System.Drawing.FontStyle.Bold);
+            lblDisassocCaption.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Regular);
+            lblDisassocCaption.ForeColor = MutedText;
 
-            lblStatusValue.Font = new System.Drawing.Font("Segoe UI Semibold", 22F, System.Drawing.FontStyle.Bold);
+            lblStatusValue.Font = new System.Drawing.Font("Segoe UI Semibold", 20F, System.Drawing.FontStyle.Bold);
             lblStatusDescription.AutoSize = true;
             lblStatusDescription.MaximumSize = new System.Drawing.Size(0, 0);
+            lblStatusDescription.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular);
 
-            rtbLogs.Font = new System.Drawing.Font("Consolas", 10F, System.Drawing.FontStyle.Regular);
+            rtbLogs.Font = new System.Drawing.Font("Consolas", 9.5F, System.Drawing.FontStyle.Regular);
+            rtbLogs.BackColor = WinColor.FromArgb(5, 10, 20);
+            rtbLogs.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            rtbLogs.ReadOnly = true;
+            rtbLogs.DetectUrls = false;
 
             txtFilterSearch.Font = new System.Drawing.Font("Segoe UI", 10F);
             txtFilterSsid.Font = new System.Drawing.Font("Segoe UI", 10F);
             txtFilterBssid.Font = new System.Drawing.Font("Segoe UI", 10F);
             cmbFrameType.Font = new System.Drawing.Font("Segoe UI", 9.5F);
+            cmbFrameType.BackColor = InputBackground;
+            cmbFrameType.ForeColor = StrongText;
+            cmbFrameType.FlatStyle = FlatStyle.Flat;
 
             chkOnlyDeauth.Font = new System.Drawing.Font("Segoe UI", 9.5F);
             chkOnlyDisassoc.Font = new System.Drawing.Font("Segoe UI", 9.5F);
@@ -166,21 +208,106 @@ namespace NetQin
             lblVisibleCount.Font = new System.Drawing.Font("Segoe UI", 9.5F);
 
             lblAppTitle.Text = "NetQin";
-            lblSubtitle.Text = "Wi-Fi Threat Analysis Console";
+            lblSubtitle.Text = "Analiza zagrożeń w ruchu Wi-Fi 802.11";
+            lblFileCaption.Text = "AKTYWNY PLIK";
+            lblTableTitle.Text = "Pakiety przechwycone";
+            lblLogsTitle.Text = "Dziennik analizy";
+            lblStatusTitle.Text = "OCENA RYZYKA";
+
+            lblAppTitle.ForeColor = StrongText;
+            lblSubtitle.ForeColor = MutedText;
+            lblFileCaption.ForeColor = MutedText;
+            lblTableTitle.ForeColor = StrongText;
+            lblLogsTitle.ForeColor = StrongText;
+            lblStatusTitle.ForeColor = MutedText;
+
+            panelPackets.BackColor = CardBackground;
+            panelDeauth.BackColor = CardBackground;
+            panelDisassoc.BackColor = CardBackground;
+            panelSuspicious.BackColor = CardBackground;
+            panelStatus.BackColor = CardBackground;
+            panelFilters.BackColor = CardBackgroundSoft;
+
+            ConfigurePacketGridStyle();
+            StyleActionButton(btnLoadPcap, PrimaryAccent, WinColor.FromArgb(139, 92, 246));
+            StyleActionButton(btnExportReport, WinColor.FromArgb(31, 74, 140), WinColor.FromArgb(37, 99, 235));
+            StyleActionButton(btnClearFilters, WinColor.FromArgb(51, 65, 92), WinColor.FromArgb(71, 85, 105));
+            StyleActionButton(btnClearLogs, WinColor.FromArgb(30, 41, 59), WinColor.FromArgb(51, 65, 85));
+
+            EnableDoubleBuffering(this);
+            EnableDoubleBuffering(dgvPackets);
+        }
+
+        private void ConfigurePacketGridStyle()
+        {
+            dgvPackets.BackgroundColor = CardBackgroundSoft;
+            dgvPackets.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            dgvPackets.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+            dgvPackets.GridColor = WinColor.FromArgb(37, 50, 75);
+            dgvPackets.EnableHeadersVisualStyles = false;
+            dgvPackets.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+            dgvPackets.ColumnHeadersHeight = 38;
+            dgvPackets.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = WinColor.FromArgb(29, 42, 68),
+                ForeColor = StrongText,
+                SelectionBackColor = WinColor.FromArgb(29, 42, 68),
+                SelectionForeColor = StrongText,
+                Font = new System.Drawing.Font("Segoe UI Semibold", 9F, System.Drawing.FontStyle.Bold),
+                Alignment = DataGridViewContentAlignment.MiddleLeft
+            };
+            dgvPackets.DefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = CardBackground,
+                ForeColor = WinColor.FromArgb(226, 232, 240),
+                SelectionBackColor = WinColor.FromArgb(45, 61, 99),
+                SelectionForeColor = WinColor.White,
+                Font = new System.Drawing.Font("Segoe UI", 9F),
+                Padding = new Padding(2, 0, 2, 0)
+            };
+            dgvPackets.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = WinColor.FromArgb(16, 25, 45),
+                ForeColor = WinColor.FromArgb(226, 232, 240),
+                SelectionBackColor = WinColor.FromArgb(45, 61, 99),
+                SelectionForeColor = WinColor.White
+            };
+        }
+
+        private static void StyleActionButton(Button button, WinColor baseColor, WinColor hoverColor)
+        {
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.UseVisualStyleBackColor = false;
+            button.BackColor = baseColor;
+            button.ForeColor = StrongText;
+            button.Cursor = Cursors.Hand;
+            button.Tag = baseColor;
+
+            button.MouseEnter += (s, e) =>
+            {
+                if (button.Enabled)
+                    button.BackColor = hoverColor;
+            };
+            button.MouseLeave += (s, e) => button.BackColor = (WinColor)button.Tag;
+        }
+
+        private static void EnableDoubleBuffering(Control control)
+        {
+            var property = typeof(Control).GetProperty(
+                "DoubleBuffered",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            if (property != null)
+                property.SetValue(control, true, null);
         }
 
         private void InitializeDynamicDashboardCards()
         {
-            dashboardLeft = panelPackets.Left;
-            dashboardTop = panelPackets.Top;
-            dashboardFullWidth = panelPackets.Width;
-            dashboardTileHeight = panelPackets.Height;
-            statusOriginalBottom = panelStatus.Bottom;
-
             panelDisassoc = new Panel
             {
                 Name = "panelDisassoc",
-                BackColor = WinColor.FromArgb(24, 28, 52),
+                BackColor = CardBackground,
                 Parent = panelPackets.Parent
             };
 
@@ -197,8 +324,8 @@ namespace NetQin
             {
                 Name = "lblDisassocCaption",
                 AutoSize = true,
-                Text = "Disassociation",
-                ForeColor = WinColor.FromArgb(172, 181, 215),
+                Text = "Rozłączenia",
+                ForeColor = MutedText,
                 BackColor = WinColor.Transparent
             };
 
@@ -212,7 +339,7 @@ namespace NetQin
             panelFilters = new Panel
             {
                 Name = "panelFilters",
-                BackColor = WinColor.FromArgb(9, 16, 45),
+                BackColor = CardBackgroundSoft,
                 Parent = dgvPackets.Parent
             };
 
@@ -360,6 +487,194 @@ namespace NetQin
             SetCueBanner(txtFilterBssid, "Filtr BSSID");
         }
 
+        private void InitializeModernWorkspace()
+        {
+            panelHeader = new Panel
+            {
+                Name = "panelHeader",
+                BackColor = HeaderBackground,
+                Parent = this
+            };
+
+            panelFileCard = new Panel
+            {
+                Name = "panelFileCard",
+                BackColor = CardBackground,
+                Parent = panelHeader
+            };
+
+            panelOperationBar = new Panel
+            {
+                Name = "panelOperationBar",
+                BackColor = CardBackgroundSoft,
+                Parent = this
+            };
+
+            lblHeaderEyebrow = CreateWorkspaceLabel(
+                "lblHeaderEyebrow",
+                "NETWORK FORENSICS",
+                new System.Drawing.Font("Segoe UI Semibold", 8.5F, System.Drawing.FontStyle.Bold),
+                SecondaryAccent);
+            lblHeaderEyebrow.Parent = panelHeader;
+
+            lblFileMeta = CreateWorkspaceLabel(
+                "lblFileMeta",
+                "Wybierz zrzut ruchu, aby rozpocząć analizę.",
+                new System.Drawing.Font("Segoe UI", 8.5F),
+                MutedText);
+            lblFileMeta.Parent = panelFileCard;
+
+            lblOperationTitle = CreateWorkspaceLabel(
+                "lblOperationTitle",
+                "Gotowy do analizy",
+                new System.Drawing.Font("Segoe UI Semibold", 9.5F, System.Drawing.FontStyle.Bold),
+                StrongText);
+            lblOperationTitle.Parent = panelOperationBar;
+
+            lblOperationDescription = CreateWorkspaceLabel(
+                "lblOperationDescription",
+                "Wczytaj plik PCAP lub PCAPNG.",
+                new System.Drawing.Font("Segoe UI", 9F),
+                MutedText);
+            lblOperationDescription.Parent = panelOperationBar;
+
+            progressOperation = new ProgressBar
+            {
+                Name = "progressOperation",
+                Parent = panelOperationBar,
+                Style = ProgressBarStyle.Marquee,
+                MarqueeAnimationSpeed = 35,
+                Visible = false
+            };
+
+            lblDashboardTitle = CreateWorkspaceLabel(
+                "lblDashboardTitle",
+                "Centrum ryzyka",
+                new System.Drawing.Font("Segoe UI Semibold", 12F, System.Drawing.FontStyle.Bold),
+                StrongText);
+            lblDashboardTitle.Parent = this;
+
+            lblDashboardSubtitle = CreateWorkspaceLabel(
+                "lblDashboardSubtitle",
+                "Najważniejsze sygnały analizy",
+                new System.Drawing.Font("Segoe UI", 9F),
+                MutedText);
+            lblDashboardSubtitle.Parent = this;
+
+            lblTableSubtitle = CreateWorkspaceLabel(
+                "lblTableSubtitle",
+                "Przeglądaj, filtruj i weryfikuj zdekodowane ramki",
+                new System.Drawing.Font("Segoe UI", 9F),
+                MutedText);
+            lblTableSubtitle.Parent = this;
+
+            lblLogsSubtitle = CreateWorkspaceLabel(
+                "lblLogsSubtitle",
+                "0 wpisów",
+                new System.Drawing.Font("Segoe UI", 9F),
+                MutedText);
+            lblLogsSubtitle.Parent = this;
+
+            lblFilterTitle = CreateWorkspaceLabel(
+                "lblFilterTitle",
+                "FILTRY PAKIETÓW",
+                new System.Drawing.Font("Segoe UI Semibold", 8.5F, System.Drawing.FontStyle.Bold),
+                MutedText);
+            lblFilterTitle.Parent = panelFilters;
+
+            lblFilterSearchCaption = CreateFilterCaption("Szukaj");
+            lblFilterSsidCaption = CreateFilterCaption("SSID");
+            lblFilterBssidCaption = CreateFilterCaption("BSSID");
+            lblFilterTypeCaption = CreateFilterCaption("Typ ramki");
+
+            btnClearLogs = new Button
+            {
+                Name = "btnClearLogs",
+                Text = "Wyczyść dziennik",
+                Parent = this,
+                FlatStyle = FlatStyle.Flat,
+                UseVisualStyleBackColor = false,
+                ForeColor = StrongText,
+                Font = new System.Drawing.Font("Segoe UI Semibold", 9F),
+                Cursor = Cursors.Hand
+            };
+            btnClearLogs.FlatAppearance.BorderSize = 0;
+            btnClearLogs.Click += (s, e) => ClearLogsView();
+
+            lblAppTitle.Parent = panelHeader;
+            lblSubtitle.Parent = panelHeader;
+            btnLoadPcap.Parent = panelHeader;
+            btnExportReport.Parent = panelHeader;
+            lblFileCaption.Parent = panelFileCard;
+            textBox1.Parent = panelFileCard;
+
+            textBox1.Text = "Nie wybrano pliku";
+            textBox1.BackColor = CardBackground;
+            textBox1.ForeColor = StrongText;
+            textBox1.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            textBox1.TabStop = false;
+
+            ConfigureInput(txtFilterSearch);
+            ConfigureInput(txtFilterSsid);
+            ConfigureInput(txtFilterBssid);
+
+            panelPacketsAccent = AddAccentBar(panelPackets, SecondaryAccent);
+            panelDeauthAccent = AddAccentBar(panelDeauth, WinColor.FromArgb(245, 158, 11));
+            panelDisassocAccent = AddAccentBar(panelDisassoc, WinColor.FromArgb(14, 165, 233));
+            panelSuspiciousAccent = AddAccentBar(panelSuspicious, WinColor.FromArgb(239, 68, 68));
+            panelStatusAccent = AddAccentBar(panelStatus, PrimaryAccent);
+
+            panelHeader.BringToFront();
+            panelOperationBar.BringToFront();
+            btnClearLogs.BringToFront();
+        }
+
+        private Label CreateFilterCaption(string text)
+        {
+            var label = CreateWorkspaceLabel(
+                "lblFilter" + text.Replace(" ", string.Empty),
+                text,
+                new System.Drawing.Font("Segoe UI", 8.5F),
+                MutedText);
+            label.Parent = panelFilters;
+            return label;
+        }
+
+        private static Label CreateWorkspaceLabel(
+            string name,
+            string text,
+            System.Drawing.Font font,
+            WinColor foreColor)
+        {
+            return new Label
+            {
+                Name = name,
+                AutoSize = true,
+                Text = text,
+                Font = font,
+                ForeColor = foreColor,
+                BackColor = WinColor.Transparent
+            };
+        }
+
+        private static Panel AddAccentBar(Panel parent, WinColor color)
+        {
+            var accent = new Panel
+            {
+                BackColor = color,
+                Parent = parent
+            };
+            accent.BringToFront();
+            return accent;
+        }
+
+        private static void ConfigureInput(TextBox textBox)
+        {
+            textBox.BackColor = InputBackground;
+            textBox.ForeColor = StrongText;
+            textBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+        }
+
         private void InitializeFilterDebounce()
         {
             filterDebounceTimer.Interval = FilterDebounceMilliseconds;
@@ -398,144 +713,232 @@ namespace NetQin
 
         private void ApplyDashboardLayout()
         {
-            int rightMargin = 28;
-            int bottomGapAboveLogs = 18;
-            int logsBottomMargin = 26;
-            int leftGapToDashboard = 22;
+            if (panelHeader == null || panelFilters == null || panelDisassoc == null)
+                return;
 
-            int filterHeight = 110;
-            int filterGapToGrid = 8;
-            int row1Top = 4;
-            int row2Top = 38;
-            int row3Top = 72;
+            SuspendLayout();
 
-            dashboardFullWidth = Math.Max(360, this.ClientSize.Width - dashboardLeft - rightMargin);
+            try
+            {
+                const int margin = 24;
+                const int headerTop = 18;
+                const int headerHeight = 110;
+                const int sectionGap = 18;
+                const int columnGap = 18;
+                const int dashboardGap = 12;
 
-            int leftAreaWidth = Math.Max(500, dashboardLeft - gridOriginalLeft - leftGapToDashboard);
+                int contentWidth = Math.Max(1000, ClientSize.Width - (margin * 2));
+                panelHeader.SetBounds(margin, headerTop, contentWidth, headerHeight);
+                LayoutHeader();
 
-            panelFilters.SetBounds(
-                gridOriginalLeft,
-                gridOriginalTop,
-                leftAreaWidth,
-                filterHeight);
+                panelOperationBar.SetBounds(margin, panelHeader.Bottom + 10, contentWidth, 42);
+                LayoutOperationBar();
 
-            int visibleLabelWidth = 160;
-            lblVisibleCount.MaximumSize = new System.Drawing.Size(visibleLabelWidth, 0);
+                int sectionHeaderTop = panelOperationBar.Bottom + sectionGap;
+                int rightRailWidth = Math.Max(360, Math.Min(410, (int)(contentWidth * 0.29)));
+                int leftAreaWidth = contentWidth - rightRailWidth - columnGap;
+                int rightRailLeft = margin + leftAreaWidth + columnGap;
+
+                lblTableTitle.SetBounds(margin, sectionHeaderTop, leftAreaWidth, 24);
+                lblTableSubtitle.SetBounds(margin, lblTableTitle.Bottom + 1, leftAreaWidth, 20);
+
+                lblDashboardTitle.SetBounds(rightRailLeft, sectionHeaderTop, rightRailWidth, 24);
+                lblDashboardSubtitle.SetBounds(rightRailLeft, lblDashboardTitle.Bottom + 1, rightRailWidth, 20);
+
+                int workAreaTop = sectionHeaderTop + 48;
+                int logsHeight = Math.Max(150, Math.Min(205, (int)(ClientSize.Height * 0.19)));
+                int logsTop = ClientSize.Height - margin - logsHeight;
+                int logsHeaderTop = logsTop - 34;
+                int workAreaBottom = logsHeaderTop - 14;
+
+                panelFilters.SetBounds(margin, workAreaTop, leftAreaWidth, 142);
+                LayoutFilterBar();
+
+                int gridTop = panelFilters.Bottom + 10;
+                dgvPackets.SetBounds(
+                    margin,
+                    gridTop,
+                    leftAreaWidth,
+                    Math.Max(180, workAreaBottom - gridTop));
+
+                int dashboardAvailableHeight = Math.Max(350, workAreaBottom - workAreaTop);
+                int tileWidth = (rightRailWidth - dashboardGap) / 2;
+                int tileHeight = Math.Max(94, Math.Min(108, (dashboardAvailableHeight - 150 - (dashboardGap * 2)) / 2));
+
+                panelPackets.SetBounds(rightRailLeft, workAreaTop, tileWidth, tileHeight);
+                panelDeauth.SetBounds(rightRailLeft + tileWidth + dashboardGap, workAreaTop, tileWidth, tileHeight);
+                panelDisassoc.SetBounds(rightRailLeft, workAreaTop + tileHeight + dashboardGap, tileWidth, tileHeight);
+                panelSuspicious.SetBounds(
+                    rightRailLeft + tileWidth + dashboardGap,
+                    workAreaTop + tileHeight + dashboardGap,
+                    tileWidth,
+                    tileHeight);
+
+                int statusTop = workAreaTop + (tileHeight * 2) + (dashboardGap * 2);
+                panelStatus.SetBounds(
+                    rightRailLeft,
+                    statusTop,
+                    rightRailWidth,
+                    Math.Max(140, workAreaBottom - statusTop));
+
+                LayoutMetricCard(panelPackets, lblPacketCount, lblPacketsCaption, panelPacketsAccent);
+                LayoutMetricCard(panelDeauth, lblDeauthCount, lblDeauthCaption, panelDeauthAccent);
+                LayoutMetricCard(panelDisassoc, lblDisassocCount, lblDisassocCaption, panelDisassocAccent);
+                LayoutMetricCard(panelSuspicious, lblSuspiciousCount, lblSuspiciousCaption, panelSuspiciousAccent);
+                LayoutStatusCard();
+
+                lblLogsTitle.SetBounds(margin, logsHeaderTop + 7, 180, 24);
+                lblLogsSubtitle.SetBounds(lblLogsTitle.Right + 8, logsHeaderTop + 10, 220, 20);
+                btnClearLogs.SetBounds(ClientSize.Width - margin - 142, logsHeaderTop, 142, 28);
+                rtbLogs.SetBounds(margin, logsTop, contentWidth, logsHeight);
+            }
+            finally
+            {
+                ResumeLayout();
+            }
+        }
+
+        private void LayoutHeader()
+        {
+            const int padding = 20;
+            const int actionGap = 10;
+            const int importWidth = 180;
+            const int exportWidth = 164;
+
+            lblHeaderEyebrow.SetBounds(padding + 2, 15, 260, 18);
+            lblAppTitle.SetBounds(padding, 30, 270, 45);
+            lblSubtitle.SetBounds(padding + 2, 76, 300, 22);
+
+            btnExportReport.SetBounds(panelHeader.Width - padding - exportWidth, 29, exportWidth, 50);
+            btnLoadPcap.SetBounds(btnExportReport.Left - actionGap - importWidth, 29, importWidth, 50);
+
+            int fileCardLeft = 330;
+            panelFileCard.SetBounds(
+                fileCardLeft,
+                17,
+                Math.Max(280, btnLoadPcap.Left - fileCardLeft - 18),
+                76);
+
+            lblFileCaption.SetBounds(14, 10, panelFileCard.Width - 28, 18);
+            textBox1.SetBounds(14, 30, panelFileCard.Width - 28, 23);
+            lblFileMeta.SetBounds(14, 54, panelFileCard.Width - 28, 18);
+        }
+
+        private void LayoutOperationBar()
+        {
+            lblOperationTitle.SetBounds(16, 5, 210, 20);
+            lblOperationDescription.SetBounds(230, 7, Math.Max(220, panelOperationBar.Width - 470), 20);
+            progressOperation.SetBounds(panelOperationBar.Width - 204, 12, 184, 16);
+        }
+
+        private void LayoutFilterBar()
+        {
+            const int padding = 16;
+            const int gap = 10;
+            const int typeWidth = 150;
+
+            lblFilterTitle.SetBounds(padding, 11, 180, 18);
+
             lblVisibleCount.AutoSize = false;
             lblVisibleCount.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            lblVisibleCount.SetBounds(
-                leftAreaWidth - visibleLabelWidth,
-                row1Top + 2,
-                visibleLabelWidth,
-                24);
+            lblVisibleCount.SetBounds(panelFilters.Width - 200, 10, 184, 20);
 
-            int fullRowWidth = leftAreaWidth - 12;
-            int firstRowWidth = leftAreaWidth - visibleLabelWidth - 12;
+            int controlsTop = 56;
+            int captionsTop = 35;
+            int availableForTextInputs = panelFilters.Width - (padding * 2) - typeWidth - (gap * 3);
+            int searchWidth = Math.Max(220, (int)(availableForTextInputs * 0.40));
+            int secondaryWidth = Math.Max(135, (availableForTextInputs - searchWidth) / 2);
 
-            txtFilterSearch.SetBounds(0, row1Top, Math.Max(220, firstRowWidth), 28);
+            lblFilterSearchCaption.SetBounds(padding, captionsTop, searchWidth, 18);
+            txtFilterSearch.SetBounds(padding, controlsTop, searchWidth, 28);
 
-            int secondRowGap = 8;
-            int secondRowControlWidth = Math.Max(120, (fullRowWidth - (secondRowGap * 2)) / 3);
+            int ssidLeft = txtFilterSearch.Right + gap;
+            lblFilterSsidCaption.SetBounds(ssidLeft, captionsTop, secondaryWidth, 18);
+            txtFilterSsid.SetBounds(ssidLeft, controlsTop, secondaryWidth, 28);
 
-            txtFilterSsid.SetBounds(0, row2Top, secondRowControlWidth, 28);
-            txtFilterBssid.SetBounds(txtFilterSsid.Right + secondRowGap, row2Top, secondRowControlWidth, 28);
-            cmbFrameType.SetBounds(txtFilterBssid.Right + secondRowGap, row2Top, secondRowControlWidth, 29);
+            int bssidLeft = txtFilterSsid.Right + gap;
+            lblFilterBssidCaption.SetBounds(bssidLeft, captionsTop, secondaryWidth, 18);
+            txtFilterBssid.SetBounds(bssidLeft, controlsTop, secondaryWidth, 28);
 
-            chkOnlyDeauth.Left = 0;
-            chkOnlyDeauth.Top = row3Top + 2;
+            int typeLeft = txtFilterBssid.Right + gap;
+            lblFilterTypeCaption.SetBounds(typeLeft, captionsTop, typeWidth, 18);
+            cmbFrameType.SetBounds(typeLeft, controlsTop, typeWidth, 29);
 
-            chkOnlyDisassoc.Left = chkOnlyDeauth.Right + 16;
-            chkOnlyDisassoc.Top = row3Top + 2;
+            int togglesTop = 104;
+            chkOnlyDeauth.SetBounds(padding, togglesTop, chkOnlyDeauth.Width, 22);
+            chkOnlyDisassoc.SetBounds(chkOnlyDeauth.Right + 14, togglesTop, chkOnlyDisassoc.Width, 22);
+            chkOnlySuspicious.SetBounds(chkOnlyDisassoc.Right + 14, togglesTop, chkOnlySuspicious.Width, 22);
+            chkOnlyBeacon.SetBounds(chkOnlySuspicious.Right + 14, togglesTop, chkOnlyBeacon.Width, 22);
+            chkOnlyAuthAssoc.SetBounds(chkOnlyBeacon.Right + 14, togglesTop, chkOnlyAuthAssoc.Width, 22);
 
-            chkOnlySuspicious.Left = chkOnlyDisassoc.Right + 16;
-            chkOnlySuspicious.Top = row3Top + 2;
+            btnClearFilters.SetBounds(panelFilters.Width - padding - 132, 101, 132, 29);
+        }
 
-            chkOnlyBeacon.Left = chkOnlySuspicious.Right + 16;
-            chkOnlyBeacon.Top = row3Top + 2;
+        private static void LayoutMetricCard(Panel panel, Label value, Label caption, Panel accent)
+        {
+            accent.SetBounds(0, 0, 4, panel.Height);
+            value.SetBounds(17, 12, panel.Width - 28, 48);
+            caption.SetBounds(19, Math.Max(61, panel.Height - 35), panel.Width - 28, 24);
+        }
 
-            int clearButtonWidth = 140;
-            int clearButtonLeft = leftAreaWidth - clearButtonWidth;
-
-            btnClearFilters.SetBounds(
-                clearButtonLeft,
-                row3Top - 2,
-                clearButtonWidth,
-                30);
-
-            chkOnlyAuthAssoc.Top = row3Top + 2;
-            chkOnlyAuthAssoc.Left = chkOnlyBeacon.Right + 16;
-
-            int authAssocMaxLeft = btnClearFilters.Left - chkOnlyAuthAssoc.Width - 16;
-            if (chkOnlyAuthAssoc.Left > authAssocMaxLeft)
-            {
-                chkOnlyAuthAssoc.Left = Math.Max(chkOnlyBeacon.Right + 8, authAssocMaxLeft);
-            }
-
-            int gridTop = panelFilters.Bottom + filterGapToGrid;
-            int gridHeight = Math.Max(220, rtbLogs.Top - gridTop - 10);
-
-            dgvPackets.SetBounds(
-                gridOriginalLeft,
-                gridTop,
-                leftAreaWidth,
-                gridHeight);
-
-            int availableHeight = rtbLogs.Top - dashboardTop - bottomGapAboveLogs;
-            int statusHeight = Math.Max(170, Math.Min(280, (int)(availableHeight * 0.44)));
-            int tileHeight = Math.Max(98, (availableHeight - statusHeight - (dashboardGap * 2)) / 2);
-            int tileWidth = (dashboardFullWidth - dashboardGap) / 2;
-
-            panelPackets.SetBounds(
-                dashboardLeft,
-                dashboardTop,
-                tileWidth,
-                tileHeight);
-
-            panelDeauth.SetBounds(
-                dashboardLeft + tileWidth + dashboardGap,
-                dashboardTop,
-                tileWidth,
-                tileHeight);
-
-            panelDisassoc.SetBounds(
-                dashboardLeft,
-                dashboardTop + tileHeight + dashboardGap,
-                tileWidth,
-                tileHeight);
-
-            panelSuspicious.SetBounds(
-                dashboardLeft + tileWidth + dashboardGap,
-                dashboardTop + tileHeight + dashboardGap,
-                tileWidth,
-                tileHeight);
-
-            int statusTop = dashboardTop + (tileHeight * 2) + (dashboardGap * 2);
-            panelStatus.SetBounds(
-                dashboardLeft,
-                statusTop,
-                dashboardFullWidth,
-                statusHeight);
-
-            lblDisassocCount.Left = 18;
-            lblDisassocCount.Top = 12;
-            lblDisassocCaption.Left = 18;
-            lblDisassocCaption.Top = lblDisassocCount.Bottom + 6;
-            lblDisassocCaption.MaximumSize = new System.Drawing.Size(panelDisassoc.Width - 30, 0);
-            lblDisassocCaption.AutoSize = true;
-
-            lblStatusValue.Left = 18;
-            lblStatusValue.Top = 44;
-
-            lblStatusDescription.Left = 18;
-            lblStatusDescription.Top = lblStatusValue.Bottom + 10;
+        private void LayoutStatusCard()
+        {
+            panelStatusAccent.SetBounds(0, 0, 4, panelStatus.Height);
+            lblStatusTitle.SetBounds(18, 14, panelStatus.Width - 36, 20);
+            lblStatusValue.SetBounds(17, 37, panelStatus.Width - 34, 45);
+            lblStatusDescription.SetBounds(18, 86, panelStatus.Width - 36, panelStatus.Height - 98);
             lblStatusDescription.MaximumSize = new System.Drawing.Size(panelStatus.Width - 36, 0);
-            lblStatusDescription.AutoSize = true;
+        }
 
-            rtbLogs.SetBounds(
-                rtbLogs.Left,
-                rtbLogs.Top,
-                this.ClientSize.Width - rtbLogs.Left - rightMargin,
-                this.ClientSize.Height - rtbLogs.Top - logsBottomMargin);
+        private void UpdateActionState()
+        {
+            bool isBusy = isAnalysisRunning || isReportExportRunning;
+
+            btnLoadPcap.Enabled = !isBusy;
+            btnExportReport.Enabled = !isBusy && _currentResult != null;
+            panelFilters.Enabled = !isAnalysisRunning;
+
+            btnLoadPcap.Text = isAnalysisRunning ? "Analizowanie..." : "Importuj PCAP";
+            btnExportReport.Text = isReportExportRunning ? "Generowanie..." : "Eksportuj PDF";
+
+            btnLoadPcap.BackColor = btnLoadPcap.Enabled
+                ? (WinColor)btnLoadPcap.Tag
+                : WinColor.FromArgb(71, 85, 105);
+            btnExportReport.BackColor = btnExportReport.Enabled
+                ? (WinColor)btnExportReport.Tag
+                : WinColor.FromArgb(51, 65, 85);
+
+            UseWaitCursor = isBusy;
+        }
+
+        private void SetOperationState(string title, string description, bool busy, WinColor accent)
+        {
+            lblOperationTitle.Text = title;
+            lblOperationTitle.ForeColor = accent;
+            lblOperationDescription.Text = description;
+            progressOperation.Visible = busy;
+        }
+
+        private void UpdateFilePresentation(string filePath, string stateDescription)
+        {
+            bool hasFile = !string.IsNullOrWhiteSpace(filePath);
+            textBox1.Text = hasFile ? Path.GetFileName(filePath) : "Nie wybrano pliku";
+            lblFileMeta.Text = stateDescription;
+            fileNameToolTip.SetToolTip(textBox1, hasFile ? filePath : "Brak wczytanego pliku");
+        }
+
+        private void ClearLogsView()
+        {
+            rtbLogs.Clear();
+            visibleLogEntryCount = 0;
+            UpdateLogsMeta();
+        }
+
+        private void UpdateLogsMeta()
+        {
+            lblLogsSubtitle.Text = visibleLogEntryCount == 1
+                ? "1 wpis"
+                : string.Format("{0} wpisów", visibleLogEntryCount);
         }
 
         private async void btnLoadPcap_Click(object sender, EventArgs e)
@@ -558,15 +961,16 @@ namespace NetQin
                     return;
 
                 currentFilePath = openFileDialog.FileName;
-                textBox1.Text = Path.GetFileName(currentFilePath);
-                fileNameToolTip.SetToolTip(textBox1, currentFilePath);
-
                 ResetView();
-                LogMessage("INFO", $"Rozpoczęto analizę pliku: {currentFilePath}", WinColor.Lime);
-
                 isAnalysisRunning = true;
-                btnLoadPcap.Enabled = false;
-                btnExportReport.Enabled = false;
+                UpdateFilePresentation(currentFilePath, "Analiza w toku...");
+                UpdateActionState();
+                SetOperationState(
+                    "Analizowanie zrzutu",
+                    "Dekodowanie ramek, uruchamianie reguł detekcji i korelacja incydentów.",
+                    true,
+                    SecondaryAccent);
+                LogMessage("INFO", $"Rozpoczęto analizę pliku: {currentFilePath}", SecondaryAccent);
 
                 try
                 {
@@ -585,19 +989,37 @@ namespace NetQin
                         $"Błędy parsowania: {_currentResult.Statistics.ParseErrorCount}.",
                         WinColor.Lime
                     );
+
+                    UpdateFilePresentation(
+                        currentFilePath,
+                        string.Format(
+                            "{0} pakietów | {1} incydentów | {2} korelacji",
+                            _currentResult.Statistics.TotalPackets,
+                            _currentResult.Incidents.Count,
+                            _currentResult.CorrelatedIncidents.Count));
+                    SetOperationState(
+                        "Analiza zakończona",
+                        "Wyniki są gotowe. Możesz filtrować pakiety lub wyeksportować raport PDF.",
+                        false,
+                        WinColor.FromArgb(34, 197, 94));
                 }
                 catch (Exception ex)
                 {
                     _currentResult = null;
                     LogMessage("ERROR", $"Nie udało się przeanalizować pliku PCAP. ({ex.Message})", WinColor.Red);
+                    UpdateFilePresentation(currentFilePath, "Analiza zakończyła się błędem.");
+                    SetOperationState(
+                        "Błąd analizy",
+                        "Nie udało się przetworzyć pliku. Szczegóły znajdziesz w dzienniku.",
+                        false,
+                        WinColor.FromArgb(248, 113, 113));
                     UpdateDashboard();
                     UpdateVisibleCount(0, 0);
                 }
                 finally
                 {
                     isAnalysisRunning = false;
-                    btnLoadPcap.Enabled = true;
-                    btnExportReport.Enabled = _currentResult != null;
+                    UpdateActionState();
                 }
             }
         }
@@ -641,6 +1063,8 @@ namespace NetQin
         private void RenderAnalysisResult(AnalysisResult result)
         {
             rtbLogs.Clear();
+            visibleLogEntryCount = 0;
+            UpdateLogsMeta();
 
             foreach (var log in result.Logs)
             {
@@ -838,6 +1262,8 @@ namespace NetQin
             filterDebounceTimer.Stop();
             dgvPackets.Rows.Clear();
             rtbLogs.Clear();
+            visibleLogEntryCount = 0;
+            UpdateLogsMeta();
             _currentResult = null;
 
             lblPacketCount.Text = "0";
@@ -845,12 +1271,12 @@ namespace NetQin
             lblDisassocCount.Text = "0";
             lblSuspiciousCount.Text = "0";
 
-            panelPackets.BackColor = WinColor.FromArgb(24, 28, 52);
-            panelDeauth.BackColor = WinColor.FromArgb(24, 28, 52);
-            panelDisassoc.BackColor = WinColor.FromArgb(24, 28, 52);
-            panelSuspicious.BackColor = WinColor.FromArgb(24, 28, 52);
+            panelPackets.BackColor = CardBackground;
+            panelDeauth.BackColor = CardBackground;
+            panelDisassoc.BackColor = CardBackground;
+            panelSuspicious.BackColor = CardBackground;
 
-            panelStatus.BackColor = WinColor.FromArgb(24, 28, 52);
+            panelStatus.BackColor = CardBackground;
             lblStatusValue.Text = "BRAK DANYCH";
             lblStatusValue.ForeColor = WinColor.LightGray;
             lblStatusDescription.Text = "Oczekiwanie na analizę pliku...";
@@ -891,21 +1317,21 @@ namespace NetQin
             lblDisassocCount.ForeColor = stats.DisassocCount > 0 ? WinColor.DeepSkyBlue : WinColor.White;
             lblSuspiciousCount.ForeColor = stats.SuspiciousBurstCount > 0 ? WinColor.FromArgb(255, 80, 80) : WinColor.White;
 
-            lblPacketsCaption.ForeColor = WinColor.FromArgb(172, 181, 215);
-            lblDeauthCaption.ForeColor = WinColor.FromArgb(172, 181, 215);
-            lblSuspiciousCaption.ForeColor = WinColor.FromArgb(172, 181, 215);
-            lblDisassocCaption.ForeColor = WinColor.FromArgb(172, 181, 215);
+            lblPacketsCaption.ForeColor = MutedText;
+            lblDeauthCaption.ForeColor = MutedText;
+            lblSuspiciousCaption.ForeColor = MutedText;
+            lblDisassocCaption.ForeColor = MutedText;
 
-            panelPackets.BackColor = WinColor.FromArgb(24, 28, 52);
+            panelPackets.BackColor = CardBackground;
             panelDeauth.BackColor = stats.DeauthCount > 0
                 ? WinColor.FromArgb(74, 52, 0)
-                : WinColor.FromArgb(24, 28, 52);
+                : CardBackground;
             panelDisassoc.BackColor = stats.DisassocCount > 0
                 ? WinColor.FromArgb(19, 57, 91)
-                : WinColor.FromArgb(24, 28, 52);
+                : CardBackground;
             panelSuspicious.BackColor = (stats.SuspiciousBurstCount > 0 || correlatedIncidents.Any())
                 ? WinColor.FromArgb(74, 24, 24)
-                : WinColor.FromArgb(24, 28, 52);
+                : CardBackground;
 
             if (correlatedDominates && topCorrelated != null)
             {
@@ -962,7 +1388,7 @@ namespace NetQin
             }
             else
             {
-                panelStatus.BackColor = WinColor.FromArgb(24, 28, 52);
+                panelStatus.BackColor = CardBackground;
                 lblStatusValue.Text = "BRAK DANYCH";
                 lblStatusValue.ForeColor = WinColor.LightGray;
                 lblStatusDescription.Text = "Oczekiwanie na analizę pliku...";
@@ -1131,6 +1557,8 @@ namespace NetQin
             rtbLogs.SelectionColor = color;
             rtbLogs.AppendText($"[{(timestamp ?? DateTime.Now):HH:mm:ss}] {level}: {message}\n");
             rtbLogs.ScrollToCaret();
+            visibleLogEntryCount++;
+            UpdateLogsMeta();
         }
 
         private async void btnExportReport_Click(object sender, EventArgs e)
@@ -1161,8 +1589,12 @@ namespace NetQin
                 string reportLogs = rtbLogs.Text;
 
                 isReportExportRunning = true;
-                btnLoadPcap.Enabled = false;
-                btnExportReport.Enabled = false;
+                UpdateActionState();
+                SetOperationState(
+                    "Generowanie raportu",
+                    "Tworzenie dokumentu PDF z podsumowaniem, incydentami i rekomendacjami.",
+                    true,
+                    PrimaryAccent);
 
                 try
                 {
@@ -1173,16 +1605,25 @@ namespace NetQin
                         reportLogs));
 
                     LogMessage("SUCCESS", $"Raport PDF zapisano: {saveFileDialog.FileName}", WinColor.Lime);
+                    SetOperationState(
+                        "Raport zapisany",
+                        "Eksport PDF zakończył się powodzeniem.",
+                        false,
+                        WinColor.FromArgb(34, 197, 94));
                 }
                 catch (Exception ex)
                 {
                     LogMessage("ERROR", $"Nie udało się zapisać raportu PDF. ({ex.Message})", WinColor.Red);
+                    SetOperationState(
+                        "Błąd eksportu",
+                        "Nie udało się zapisać raportu PDF. Szczegóły znajdziesz w dzienniku.",
+                        false,
+                        WinColor.FromArgb(248, 113, 113));
                 }
                 finally
                 {
                     isReportExportRunning = false;
-                    btnLoadPcap.Enabled = !isAnalysisRunning;
-                    btnExportReport.Enabled = _currentResult != null && !isAnalysisRunning;
+                    UpdateActionState();
                 }
             }
         }
